@@ -1,20 +1,13 @@
-/**
- * Chitkara Qualifier 1 - REST APIs
- * POST /bfhl | GET /health
- * Replace OFFICIAL_EMAIL with your Chitkara email before submission.
- */
-
 require("dotenv").config();
 const express = require("express");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
 const app = express();
 
 const OFFICIAL_EMAIL = process.env.OFFICIAL_EMAIL || "your.email@chitkara.edu.in";
 const PORT = process.env.PORT || 3000;
 
-// Middleware: parse JSON, size limit for security
 app.use(express.json({ limit: "10kb" }));
-
-// --- Helpers ---
 
 function isPrime(n) {
   if (n < 2 || !Number.isInteger(n)) return false;
@@ -60,33 +53,26 @@ function hcf(arr) {
   return result;
 }
 
-async function getAiSingleWord(question) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY not set");
-  }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-  const body = {
-    contents: [{ parts: [{ text: `Answer in exactly one word only. No punctuation. Question: ${question}` }] }],
-    generationConfig: { maxOutputTokens: 10, temperature: 0 },
-  };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err || `AI API error: ${res.status}`);
-  }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("No AI response");
-  const word = String(text).trim().replace(/[.,!?;:]$/g, "");
-  return word.split(/\s+/)[0] || word;
-}
+const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// --- GET /health ---
+async function getAiSingleWord(question) {
+  const model = ai.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    systemInstruction:
+      "You are a concise assistant. Respond with exactly one word. No punctuation, no sentences."
+  });
+
+  try {
+    const result = await model.generateContent(question + " (One word only)");
+    const response = await result.response;
+    const text = response.text().trim();
+    const word = text.replace(/[.,!?;:]$/g, "");
+    return word.split(/\s+/)[0] || word;
+  } catch (error) {
+    console.error("AI Error:", error.message);
+    throw new Error("AI Error");
+  }
+}
 
 app.get("/health", (req, res) => {
   try {
@@ -101,8 +87,6 @@ app.get("/health", (req, res) => {
     });
   }
 });
-
-// --- POST /bfhl ---
 
 app.post("/bfhl", async (req, res) => {
   const keys = ["fibonacci", "prime", "lcm", "hcf", "AI"];
@@ -238,13 +222,6 @@ app.post("/bfhl", async (req, res) => {
       error: "Invalid key",
     });
   } catch (err) {
-    if (err.message && err.message.includes("GEMINI_API_KEY")) {
-      return res.status(503).json({
-        is_success: false,
-        official_email: OFFICIAL_EMAIL,
-        error: "AI service not configured",
-      });
-    }
     return res.status(500).json({
       is_success: false,
       official_email: OFFICIAL_EMAIL,
@@ -253,7 +230,6 @@ app.post("/bfhl", async (req, res) => {
   }
 });
 
-// 404
 app.use((req, res) => {
   res.status(404).json({
     is_success: false,
